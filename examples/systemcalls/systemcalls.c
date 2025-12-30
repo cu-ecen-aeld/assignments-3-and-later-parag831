@@ -1,4 +1,13 @@
+#include <stdio.h>      // For printf and perror
+#include <stdlib.h>     // For system, exit, EXIT_FAILURE
+#include <stdbool.h>    // For the bool type
+#include <stdarg.h>     // For va_list, va_start, va_end
+#include <string.h>     // For string manipulation (if used)
+#include <unistd.h>     // For fork, execv, close, dup2
+#include <sys/wait.h>   // For waitpid, WIFEXITED, etc.
+#include <fcntl.h>      // For open, O_WRONLY, O_CREAT, etc.
 #include "systemcalls.h"
+#include <limits.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -17,7 +26,20 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
-    return true;
+	int ret = system(cmd);
+	if(ret==-1)
+	{
+		return false;
+	}
+
+	if(WIFEXITED(ret)==true && WEXITSTATUS(ret)==0)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 /**
@@ -57,11 +79,79 @@ bool do_exec(int count, ...)
  *   (first argument to execv), and use the remaining arguments
  *   as second argument to the execv() command.
  *
-*/
+*/	
+	bool success = true;
+	char * str=realpath(command[0],NULL);
+	if(str!=NULL)
+	{
+		command[0]=str;
+	}
+	else
+	{
+		perror("path_error");
+		
+		success = false;
+	}
 
+	pid_t pid;
+	pid = fork();
+	if(success && pid == -1)
+	{
+		perror("fork");
+		success = false;
+	}
+	if(!pid)
+	{
+	   if(success)
+	   {
+		int ret = execv(command[0],command);
+		if(ret==-1)
+		{
+			perror("execv");
+			_exit (EXIT_FAILURE);
+		}
+	   }
+	   _exit(EXIT_FAILURE);
+	}
+	if(success)
+	{
+		
+		int status;
+		int s=waitpid(pid,&status,0);
+		if(s==-1)
+		{
+			perror("waitpid");
+			
+			success=false;
+		}
+		else
+		{
+			
+   				
+			printf ("pid=%d\n", pid);
+			if (WIFEXITED (status))
+			{
+				printf ("Normal termination with exit status=%d\n",WEXITSTATUS (status));
+				if(WEXITSTATUS(status)==0)
+				{
+					success=true;
+				}
+				else
+				{
+					success=false;
+				}
+			}
+			if (WIFSIGNALED (status))
+			{
+				printf ("Killed by signal=%d%s\n",WTERMSIG (status),WCOREDUMP (status) ? " (dumped core)" : "");
+				success = false;
+			}
+		}
+	}
+
+    free(str);
     va_end(args);
-
-    return true;
+    return success;
 }
 
 /**
@@ -93,7 +183,101 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
-    va_end(args);
+	bool success=true;
+	char * str=realpath(command[0],NULL);
+	if(str!=NULL)
+	{
+		command[0]=str;
+	}
+	else
+	{
+		perror("path_error");
+		success = false;
+	}
 
-    return true;
+	
+	int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+	if (success && fd < 0) {
+		perror("open");  
+    		success = false;  
+	}
+
+	pid_t pid;
+	pid = fork();
+	if(success && pid == -1)
+	{
+		perror("fork");
+		close(fd); 
+		
+    		success = false;  
+	}
+	
+	
+	
+	if(!pid)
+	{
+	  if(success)
+	  {
+		if (dup2(fd, 1) < 0) 
+		{ 
+			perror("dup2"); 
+			close(fd); 
+			_exit(EXIT_FAILURE);
+		}
+		
+		int ret = execv(command[0],command);
+		if(ret==-1)
+		{
+			perror("execv");
+			_exit (EXIT_FAILURE);
+		}
+	  }
+	  _exit(EXIT_FAILURE);
+	}
+	
+	if(fd>=0) { close(fd);}
+	
+	if(success)
+	{	
+		
+		
+		int status;
+		int s=waitpid(pid,&status,0);
+		if(s==-1)
+		{
+			perror("waitpid");
+			
+			success=false;
+		}
+		else
+		{	
+				
+			printf ("pid=%d\n", pid);
+			if (WIFEXITED (status))
+			{
+				printf ("Normal termination with exit status=%d\n",WEXITSTATUS (status));
+				if(WEXITSTATUS(status)==0)
+				{
+					success=true;
+				}
+				else
+				{
+					success=false;
+				}
+			}
+			if (WIFSIGNALED (status))
+			{
+				printf ("Killed by signal=%d%s\n",WTERMSIG (status),WCOREDUMP (status) ? " (dumped core)" : "");
+				
+				success = false;
+			}
+		}
+			
+	}
+	
+	
+		free(str);
+    		va_end(args);
+    		return success;
+    	
 }
